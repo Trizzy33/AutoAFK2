@@ -555,18 +555,25 @@ class EmulatorInteractions(EmulatorClient):
         """
         timer: int = 0
 
-        if self.is_visible("labels/sunandstars", region=(770, 40, 100, 100)):
+        if self.is_visible("labels/sunandstars", region=(950, 220, 150, 120)):
             return True
 
+        self.logger.info(f"Attempting to recover to main screen (max {count} attempts)")
         while timer < count:
             self.click("buttons/back", suppress=True)
             self.click("buttons/back2", suppress=True)
             self.click_location("neutral")
             timer += 1
-            if self.is_visible("labels/sunandstars", region=(770, 40, 100, 100)):
+            if self.is_visible("labels/sunandstars", region=(950, 220, 150, 120)):
+                self.logger.info(f"Recovery successful after {timer} attempt(s)")
                 return True
 
         timestamp: str = datetime.now().strftime("%d-%m-%y_%H-%M-%S")
+        self.logger.error(
+            f"Recovery failed after {count} attempts. "
+            f"Could not detect main screen (looking for 'labels/sunandstars'). "
+            f"Saving screenshot: recovery_timeout_{timestamp}"
+        )
         self.save_screenshot("recovery_timeout_" + timestamp)
         return False
 
@@ -591,17 +598,25 @@ class EmulatorInteractions(EmulatorClient):
         """
         # We call this at the start and end of every activity to make sure we are back at the main map screen, if not we are lost and exit
         if state == "open":
-            self.logger.debug("opening task " + name)
-            if self.recover() is True:
-                self.logger.debug(name + " opened successfully!")
+            self.logger.debug("Opening task: " + name)
+            recovery_result = self.recover()
+            if recovery_result is True:
+                self.logger.debug(name + " opened successfully - confirmed on main screen")
             else:
-                self.logger.info("Issue opening " + name)
+                self.logger.warning(
+                    f"Issue opening {name}: Could not confirm we are on main screen. "
+                    "Recovery process failed. Task may not start correctly."
+                )
 
         if state == "close":
-            if self.recover() is True:
-                self.logger.debug(name + " completed successfully!")
+            recovery_result = self.recover()
+            if recovery_result is True:
+                self.logger.debug(name + " completed successfully - confirmed on main screen")
                 return True
             else:
                 timestamp: str = datetime.now().strftime("%d-%m-%y_%H-%M-%S")
                 self.save_screenshot(name + "_close_error_" + timestamp)
-                self.logger.info("Issue closing " + name + ".")
+                self.logger.warning(
+                    f"Issue closing {name}: Could not confirm we are on main screen. "
+                    f"Recovery process failed. Screenshot saved: {name}_close_error_{timestamp}"
+                )

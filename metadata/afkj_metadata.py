@@ -28,7 +28,7 @@ class AFKJMetadata:
         # Quick storage for commonly used regions
         self.regions: dict[str, tuple[int, int, int, int]] = {
             # locate
-            "sunandstars": (770, 40, 100, 100),
+            "sunandstars": (950, 220, 150, 120),
             "main_menu": (900, 1750, 150, 150),
             "menu_activities": (20, 950, 1050, 800),
             "back": (50, 1750, 150, 150),
