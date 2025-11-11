@@ -1595,31 +1595,16 @@ class AFKJAutomation(EmulatorInteractions):
                 )  # Long wait to stop false positives from the back button on the battle selection screen
 
                 # Wait til we see the back button in the post battle screen before running next checks
-                self.logger.info("Waiting for battle to finish (looking for 'buttons/back')...")
                 timeout = 0
-                back_found = False
-                while not back_found:
-                    back_found = self.is_visible(
-                        "buttons/back",
-                        region=self.metadata.regions["bottom_buttons"],
-                        seconds=2,
-                        retry=1,
-                    )
-                    if back_found:
-                        self.logger.info("Back button found, battle finished!")
-                        break
-                    
+                while not self.is_visible(
+                    "buttons/back",
+                    region=self.metadata.regions["bottom_buttons"],
+                    seconds=2,
+                    retry=1,
+                ):
                     timeout += 1
-                    
-                    if (
-                        timeout > 30
-                    ):  # If nothing at 30 seconds start clicking in case battery saver mode is active
-                        self.logger.debug("Timeout reached, clicking neutral location...")
-                        self.click_location("neutral")
-                    if (
-                        timeout > 60
-                    ):  # Still nothing at 60 seconds? Quit as somethings gone wrong
-                        self.logger.error("Battle timeout error! Could not detect battle completion after 60 seconds.")
+                    if timeout > 45:  # Battle is 90 seconds, if still not done, something went wrong
+                        self.logger.error("Battle timeout error! Could not detect battle completion after 90 seconds.")
                         self.save_screenshot("battle_timeout_error")
                         break
 
