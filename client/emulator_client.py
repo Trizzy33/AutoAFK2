@@ -26,7 +26,16 @@ class EmulatorClient:
         self.device: Union[Any, None] = None
         self.config: ConfigParser = config
         self.adb: Client = Client(host="127.0.0.1", port=5037)
-        self.cwd: str = os.path.dirname(os.path.abspath(sys.argv[0]))
+        
+        # Get the correct base path for both development and PyInstaller frozen executable
+        if getattr(sys, 'frozen', False):
+            # Running as compiled executable (PyInstaller)
+            # In --onedir mode, resources are in _internal subdirectory
+            self.cwd: str = os.path.join(os.path.dirname(sys.executable), '_internal')
+        else:
+            # Running in development mode
+            self.cwd: str = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        
         self.logger: Logger = logger
 
         self.wait = partial(

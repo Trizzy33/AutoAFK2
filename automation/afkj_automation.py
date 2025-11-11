@@ -1129,50 +1129,76 @@ class AFKJAutomation(EmulatorInteractions):
             formation_number (int): The formation number to load. Defaults to 1.
             already_open (bool): Whether the formations menu is already open. Defaults to False.
         """
-        if self.metadata.load_formations is False:
-            self.logger.info("Formation loading disabled")
-            return
+        try:
+            if self.metadata.load_formations is False:
+                self.logger.info("Formation loading disabled")
+                return
 
-        if self.metadata.formation > 7:
+            if self.metadata.formation > 7:
+                self.logger.info(
+                    "Formation selected higher than 7, starting from 1 again.."
+                )
+                self.metadata.formation = 1
+
             self.logger.info(
-                "Formation selected higher than 7, starting from 1 again.."
+                "Loading formation #" + str(math.trunc(self.metadata.formation))
             )
-            self.metadata.formation = 1
-
-        self.logger.info(
-            "Loading formation #" + str(math.trunc(self.metadata.formation))
-        )
-        counter = 1
-        unowned_counter = 0
-        self.wait()
-        if already_open is False:  # Sometimes we're already in the formations menu
-            self.click("buttons/records", seconds=3)
-        while counter != formation_number:
-            self.click_xy(1000, 1025)
-            counter += 1
-
-        self.click("buttons/copy", seconds=2)
-        # Handle 'Hero not owned' popup
-        if self.is_visible("labels/not_owned"):
-            while self.is_visible(
-                "labels/not_owned"
-            ):  # Try next formation and check again
-                self.logger.info("Hero/Artifact not owned, trying next formation..")
-                self.click_xy(360, 1250)
+            counter = 1
+            unowned_counter = 0
+            self.wait()
+            
+            if already_open is False:  # Sometimes we're already in the formations menu
+                # Try multiple regions to find records button
+                records_regions = [
+                    self.metadata.regions["bottom_buttons"],
+                    (0, 1600, 1080, 320),
+                ]
+                records_clicked = False
+                for region in records_regions:
+                    if self.is_visible("buttons/records", region=region, seconds=0, retry=5, confidence=0.5, click=True):
+                        records_clicked = True
+                        break
+                if not records_clicked:
+                    self.click("buttons/records", seconds=3)
+                self.wait(3)
+            
+            while counter != formation_number:
                 self.click_xy(1000, 1025)
-                self.click("buttons/copy")
-                self.metadata.formation += 1
-                unowned_counter += 1
-                if unowned_counter > 7:
-                    self.logger.info("All formations contained an unowned hero!")
-                    self.click_location(
-                        "neutral"
-                    )  # Close windows back to battle screen
-                    self.click_location(
-                        "neutral"
-                    )  # Close windows back to battle screen
-                    break
-        self.click("buttons/confirm", suppress=True, seconds=0)
+                counter += 1
+                self.wait(0.5)  # Small wait between clicks
+
+            if not self.is_visible("buttons/copy", seconds=0, retry=5, click=True):
+                self.click("buttons/copy", seconds=2)
+            
+            self.wait(1)  # Wait for any popups
+            
+            # Handle 'Hero not owned' popup
+            if self.is_visible("labels/not_owned", seconds=0, retry=1):
+                while self.is_visible(
+                    "labels/not_owned",
+                    seconds=0,
+                    retry=1,
+                ):  # Try next formation and check again
+                    self.logger.info("Hero/Artifact not owned, trying next formation..")
+                    self.click_xy(360, 1250)
+                    self.click_xy(1000, 1025)
+                    self.click("buttons/copy")
+                    self.metadata.formation += 1
+                    unowned_counter += 1
+                    if unowned_counter > 7:
+                        self.logger.info("All formations contained an unowned hero!")
+                        self.click_location("neutral")
+                        self.click_location("neutral")
+                        break
+            
+            # Note: In updated UI, there's no confirm button after copy - formation is loaded directly
+            self.wait(1)
+            self.click_location("neutral")
+            self.wait(0.5)
+        except Exception as e:
+            self.logger.error(f"Error in formation_handler: {e}", exc_info=True)
+            self.save_screenshot("formation_handler_error")
+            raise
 
     def blind_push(
         self,
@@ -1510,12 +1536,21 @@ class AFKJAutomation(EmulatorInteractions):
         # For pushing afk stages
         if mode == "afkstages":
             timeout = 0
-            if self.is_visible(
-                "buttons/records",
-                region=self.metadata.regions["bottom_buttons"],
-                seconds=0,
-                retry=20,
-            ):
+            
+            # Try multiple regions to detect AFK Stages screen
+            records_regions = [
+                (self.metadata.regions["bottom_buttons"], 20),
+                ((0, 1600, 1080, 320), 10),
+                ((600, 600, 480, 400), 10),
+                ((0, 0, 1080, 1920), 5),
+            ]
+            records_found = False
+            for region, retries in records_regions:
+                if self.is_visible("buttons/records", region=region, seconds=0, retry=retries, confidence=0.5):
+                    records_found = True
+                    break
+            
+            if records_found:
 
                 # Change formation if we we beat the 2nd round or have defeat >10 times in a row
                 if (
@@ -1547,8 +1582,6 @@ class AFKJAutomation(EmulatorInteractions):
                     elif load_formation is True:
                         self.formation_handler(self.metadata.formation)
 
-                # Season 3 single stage code
-
                 # Start Battle
                 self.click(
                     "buttons/battle",
@@ -1562,39 +1595,67 @@ class AFKJAutomation(EmulatorInteractions):
                 )  # Long wait to stop false positives from the back button on the battle selection screen
 
                 # Wait til we see the back button in the post battle screen before running next checks
+                timeout = 0
                 while not self.is_visible(
                     "buttons/back",
                     region=self.metadata.regions["bottom_buttons"],
-                    seconds=2,
+                    seconds=0,
+                    retry=1,
                 ):
+                    self.wait(2)  # Wait 2 seconds between each check
                     timeout += 1
-                    if (
-                        timeout > 30
-                    ):  # If nothing at 30 seconds start clicking in case battery saver mode is active
-                        self.click_location("neutral")
-                    if (
-                        timeout > 60
-                    ):  # Still nothing at 60 seconds? Quit as somethings gone wrong
-                        self.logger.info("Battle timeout error!")
+                    if timeout > 45:  # Battle is 90 seconds, if still not done, something went wrong
+                        self.logger.error("Battle timeout error! Could not detect battle completion after 90 seconds.")
+                        self.save_screenshot("battle_timeout_error")
                         break
 
                 # Post battle screen detection
                 result = ""
-                while result == "":
-                    # Loop the different scenarios until we get an image match ('retry' is defeat, 'battle' is normal stage victory, 'talent_trials' is talent stage victory)
-                    images = [
-                        "buttons/retry",
-                        "buttons/battle",
-                        "buttons/talent_trials",
-                    ]
-                    result = self.is_visible_array(
-                        images,
-                        confidence=0.9,
-                        seconds=0,
-                        retry=1,
-                        click=True,
-                        region=self.metadata.regions["bottom_buttons"],
-                    )
+                result_timeout = 0
+                max_result_timeout = 20  # Maximum 20 attempts (40 seconds)
+                
+                images = ["buttons/retry", "buttons/battle", "buttons/talent_trials", "buttons/p_challenge"]
+                search_regions = [
+                    (0, 1500, 1080, 420),
+                    self.metadata.regions["bottom_buttons"],
+                    (0, 0, 1080, 1920),
+                ]
+                
+                while result == "" and result_timeout < max_result_timeout:
+                    for region in search_regions:
+                        result = self.is_visible_array(
+                            images,
+                            seconds=0,
+                            retry=1,
+                            click=True,
+                            region=region,
+                        )
+                        
+                        if result != "" and result != "not_found":
+                            break
+                    
+                    if result == "not_found" or result == "":
+                        result = ""  # Reset to continue loop
+                        result_timeout += 1
+                        self.wait(2)
+                    else:
+                        break
+                
+                if result == "" or result == "not_found":
+                    self.logger.error("Could not detect battle result! Trying individual button detection...")
+                    self.save_screenshot("battle_result_detection_error")
+                    
+                    # Try individual button detection
+                    buttons_to_check = ["buttons/retry", "buttons/battle", "buttons/talent_trials", "buttons/p_challenge"]
+                    for btn in buttons_to_check:
+                        if self.is_visible(btn, seconds=0, retry=1, region=(0, 0, 1080, 1920)):
+                            result = btn
+                            break
+                    
+                    if result == "" or result == "not_found":
+                        self.logger.error("Could not detect any battle result button. Exiting...")
+                        self.logger.error("Please check the screenshot: battle_result_detection_error.png")
+                        return
 
                 # Retry button indicates defeat, we run the defeat logic
                 if result == "buttons/retry":
@@ -1604,17 +1665,40 @@ class AFKJAutomation(EmulatorInteractions):
                     )
                     self.blind_push("afkstages", load_formation=False)
 
-                # The other two mean we have a victory
-                elif result == "buttons/battle" or result == "buttons/talent_trials":
+                # Victory buttons: battle, talent_trials, or p_challenge
+                elif result == "buttons/battle" or result == "buttons/talent_trials" or result == "buttons/p_challenge":
                     self.metadata.stage_defeats = 0  # Reset defeats
                     self.metadata.formation = 1  # Reset formation
                     self.logger.info("Victory! Stage passed\n")
                     self.metadata.first_stage_won = False
                     self.blind_push("afkstages", load_formation=True)
-            else:
-                self.logger.info("Something went wrong opening AFK Stages!")
+            if not records_found:
+                self.logger.error(
+                    "Failed to detect AFK Stages screen! "
+                    "Expected 'buttons/records' button not found after multiple search attempts. "
+                    "This usually means the stage selection screen did not open correctly."
+                )
+                self.logger.debug(
+                    "Searched for 'buttons/records' in: "
+                    f"1. bottom_buttons region: {self.metadata.regions['bottom_buttons']}, "
+                    f"2. extended region: (0, 1500, 1080, 420), "
+                    f"3. full screen: (0, 0, 1080, 1920)"
+                )
+                self.logger.info("Checking if we're on a different screen...")
+                
+                # Try to detect what screen we're actually on
+                if self.is_visible("labels/sunandstars", region=self.metadata.regions["sunandstars"], seconds=0, retry=1):
+                    self.logger.warning("Detected main screen instead of AFK Stages screen. Stage selection may have failed.")
+                elif self.is_visible("buttons/back", region=self.metadata.regions["bottom_buttons"], seconds=0, retry=1):
+                    self.logger.warning("Detected back button but not records button. May be on wrong screen.")
+                
                 self.save_screenshot("afk_stage_error")
-                self.recover()
+                self.logger.info("Attempting to recover to main screen...")
+                recovery_result = self.recover()
+                if recovery_result:
+                    self.logger.info("Recovery successful, returned to main screen")
+                else:
+                    self.logger.error("Recovery failed, could not return to main screen")
 
     def open_afk_stages(self, afkstages: bool = True) -> None:
         """Opens the AFK or Talent Stages based on the provided flag.
@@ -1627,6 +1711,8 @@ class AFKJAutomation(EmulatorInteractions):
             afkstages (bool): If True, opens the standard AFK Stages. If False, opens the
                             Talent Stages.
         """
+        stage_type = "AFK Stages" if afkstages else "Talent Stages"
+        
         # Open afk stage screen without prompting loot if it's >1h uncollected
         self.click_xy(450, 1825, seconds=3)
         self.click(
@@ -1650,8 +1736,11 @@ class AFKJAutomation(EmulatorInteractions):
                 + str(self.config.getint("PUSHING", "defeat_limit"))
                 + " defeats\n"
             )
-            self.click_xy(370, 1600, seconds=2)  # AFK Stage button
+            self.click_xy(370, 1600, seconds=2)  # Talent Stage button
             self.click("buttons/confirm", suppress=True)
+        
+        # Give the screen time to load after clicking
+        self.wait(2)
 
     def afk_stage_chain_proxy(self) -> None:
         """Starts an AFK Stage chain by attempting to start the stage and then
